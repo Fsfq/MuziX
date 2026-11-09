@@ -17,8 +17,8 @@ android {
     applicationId = "ru.FsFqX.Muzix"
     minSdk = 24
     targetSdk = 36
-    versionCode = 53
-    versionName = "1.1.2"
+    versionCode = 54
+    versionName = "1.1.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -186,6 +186,8 @@ BANNED_TITLE_REGEXES = [
     re.compile(r"\b(?:реакция|reaction|стрим|stream|live\s+stream)\b", re.I),
     re.compile(r"\b(?:полный\s+концерт|full\s+concert|live\s+at)\b", re.I),
     re.compile(r"\b(?:soundtrack\s+full|ost\s+full|compilation)\b", re.I),
+    re.compile(r"\b(?:звуки|шум|для сна|медитаци|атмосфер|желобок|каникулы|шум дождя|релакс для|фоновый шум|sleep sound|white noise|relaxing sound|nature sounds)\b", re.I),
+    re.compile(r"\b(?:минусовка|минус|караоке|рингтон|ringtone|sound effects|sfx|game ost|soundtrack)\b", re.I),
 ]
 
 
@@ -233,8 +235,13 @@ def _clean_artist_name(artist):
     if not artist:
         return ""
     cleaned = re.split(r"\s*(?:,|feat\.?|ft\.?|&|/|;|\sx\s)\s*", artist, flags=re.IGNORECASE)[0].strip()
-    bad = {"неизвестный исполнитель", "unknown artist", "youtube", "muzix", "various artists", "моя волна"}
-    if cleaned.lower() in bad or len(cleaned) < 2:
+    bad = {
+        "<unknown>", "unknown", "unknown artist", "неизвестный исполнитель", "неизвестный",
+        "youtube", "muzix", "various artists", "моя волна", "soundtrack", "ost",
+        "call of duty", "jack wall", "audio", "sound", "voice", "recording", "запись", "трек", "музыка"
+    }
+    low = cleaned.lower()
+    if low in bad or any(b in low for b in ("<unknown>", "soundtrack", "call of duty", "диктофон")) or len(cleaned) < 2:
         return ""
     return cleaned
 
@@ -843,9 +850,10 @@ def fetch_wave_candidates(
         for mterm in mood_terms[:2]:
             futures.append(executor.submit(_yandex_search_candidates, mterm, 8, effective_mood))
 
-        # чарты трендов
-        if not is_instrumental_only and (eff_character == "Популярное" or len(picked_seeds) < 3):
-            futures.append(executor.submit(_yandex_chart_candidates, 16))
+        # чарты трендов (проверенные топ-хиты iTunes и Deezer)
+        if not is_instrumental_only:
+            futures.append(executor.submit(_itunes_chart_candidates, 25))
+            futures.append(executor.submit(_deezer_chart_candidates, 25))
 
         # ожидание потоков
         done, _ = concurrent.futures.wait(futures, timeout=3.5)
@@ -1077,25 +1085,35 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
                 c_art = _clean_str(raw_art)
                 c_tit = _clean_str(raw_tit)
 
-                score = 50.0
+                score = 0.0
+
+                # совпадение названия обязательно
                 if clean_t and clean_t in c_tit:
                     score += 50.0
+                elif clean_t and all(word in c_tit for word in clean_t.split() if len(word) > 2):
+                    score += 45.0
                 elif clean_t and any(word in c_tit for word in clean_t.split() if len(word) > 2):
                     score += 25.0
+                else:
+                    continue
 
-                if clean_a and clean_a in c_art:
+                # артист
+                if clean_a and (clean_a in c_art or c_art in clean_a):
                     score += 40.0
                 elif clean_a and any(word in c_art for word in clean_a.split() if len(word) > 2):
                     score += 20.0
+                elif not clean_a:
+                    score += 10.0
 
+                # длительность
                 if expected_dur_sec > 0 and dur_sec > 0:
                     diff = abs(dur_sec - expected_dur_sec)
                     if diff <= 8:
-                        score += 30.0
+                        score += 25.0
                     elif diff <= 20:
                         score += 15.0
                     elif diff > 60:
-                        score -= 25.0
+                        score -= 30.0
 
                 if dur_sec > 0 and (dur_sec < 45 or dur_sec > 600):
                     score -= 80.0
@@ -1116,7 +1134,7 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
         except Exception as ex:
             print(f"Direct mp3 note for '{q}': {ex}")
 
-    if best_candidate and best_score >= 60.0:
+    if best_candidate and best_score >= 70.0:
         return best_candidate
     return None
 

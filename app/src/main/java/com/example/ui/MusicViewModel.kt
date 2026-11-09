@@ -2435,16 +2435,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val all = _allTracks.value
         val favIds = _favoriteTrackIds.value
         // фильтр треков
-        val validLocal = all.filter { it.duration in 60_000L..600_000L && it.artist.isNotBlank() }
-        val cachedSeeds = prefs.getStringSet("cached_seed_artists", emptySet()) ?: emptySet()
-        val seedArtists = if (validLocal.isNotEmpty()) {
-            validLocal.map { it.artist }.distinct().shuffled().take(15)
-        } else if (cachedSeeds.isNotEmpty()) {
-            cachedSeeds.toList().shuffled().take(15)
-        } else {
-            listOf("DVRST", "Big Baby Tape", "Miyagi & Эндшпиль", "Skrillex", "The Prodigy", "The Weeknd", "Daft Punk")
+        val bannedMarkers = setOf(
+            "<unknown>", "unknown", "unknown artist", "неизвестный", "неизвестный исполнитель",
+            "audio", "sound", "track", "voice", "ost", "soundtrack", "recording", "запись"
+        )
+        val validLocal = all.filter {
+            it.duration in 60_000L..600_000L &&
+            it.artist.isNotBlank() &&
+            it.artist.trim().lowercase() !in bannedMarkers &&
+            !it.artist.contains("call of duty", ignoreCase = true) &&
+            !it.artist.contains("soundtrack", ignoreCase = true)
         }
-        val favArtists = validLocal.filter { it.id in favIds }.map { it.artist }.distinct().shuffled().take(12)
+
+        val moodSeeds = when (_waveMood.value) {
+            "Бодрое" -> listOf("DVRST", "Big Baby Tape", "Kizaru", "Miyagi & Эндшпиль", "FRIENDLY THUG 52 NGG", "Skrillex", "The Prodigy", "PHARAOH")
+            "Спокойное" -> listOf("Miyagi & Andy Panda", "Скриптонит", "Сироткин", "Zoloto", "три дня дождя", "Дайте танк (!)", "Saluki")
+            "Мрачное" -> listOf("Crystal Castles", "Молчат Дома", "Ploho", "IC3PEAK", "Mareux", "Буерак", "GSPD")
+            "Весёлое" -> listOf("Daft Punk", "The Weeknd", "Dua Lipa", "DEAD BLONDE", "Cream Soda", "Lida", "GONE.Fludd", "The Hatters")
+            else -> listOf("Miyagi & Эндшпиль", "Big Baby Tape", "Kizaru", "DVRST", "The Weeknd", "Скриптонит", "Daft Punk")
+        }
+
+        val favArtists = validLocal.filter { it.id in favIds }.map { it.artist }.distinct().shuffled().take(10)
+        val localArtists = validLocal.map { it.artist }.distinct().shuffled().take(8)
+
+        val seedArtists = (favArtists + localArtists + moodSeeds).distinct().take(15)
         val banned = getBannedWaveSet().toList()
         val seen = synchronized(waveSeenKeys) { waveSeenKeys.toList() }
 
