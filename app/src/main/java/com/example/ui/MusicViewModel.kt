@@ -2315,7 +2315,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     resolveNextWaveTrackFromPool() ?: resolveNextLocalWaveTrack()
                 }
             }
-            else -> resolveNextWaveTrackFromPool() ?: resolveNextLocalWaveTrack()
+            else -> resolveNextWaveTrackFromPool()
         }
     }
 
@@ -2395,9 +2395,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         _waveLoadingRemainingText.value = "Локальный трек"
                         resolveNextLocalWaveTrack()
                     } else null
-                } ?: resolveNextLocalWaveTrack()
-                  ?: _allTracks.value.firstOrNull { it.duration in 60_000L..600_000L }
-                  ?: _allTracks.value.firstOrNull()
+                } ?: if (mode == "Локально" || mode == "Гибрид") {
+                    resolveNextLocalWaveTrack()
+                        ?: _allTracks.value.firstOrNull { it.duration in 60_000L..600_000L }
+                        ?: _allTracks.value.firstOrNull()
+                } else null
 
                 withContext(Dispatchers.Main) {
                     _waveLoadingProgress.value = 1.0f
@@ -2615,9 +2617,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             _waveLoadingRemainingText.value = "Буферизация"
                             resolveNextWaveTrack()
                         } else null
-                    } ?: resolveNextLocalWaveTrack()
-                      ?: _allTracks.value.firstOrNull { it.duration in 60_000L..600_000L }
-                      ?: _allTracks.value.firstOrNull()
+                    } ?: if (mode == "Локально" || mode == "Гибрид") {
+                        resolveNextLocalWaveTrack()
+                            ?: _allTracks.value.firstOrNull { it.duration in 60_000L..600_000L }
+                            ?: _allTracks.value.firstOrNull()
+                    } else null
                 } catch (_: Exception) { null }
                 withContext(Dispatchers.Main) {
                     _isWaveLoading.value = false

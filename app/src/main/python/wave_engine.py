@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import concurrent.futures
+import html
 import json
 import os
 import random
@@ -525,7 +526,7 @@ def _fetch_innertube_search(query, limit=15, reason=""):
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8"
             }
         )
-        with urllib.request.urlopen(req, timeout=4.0) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
         def find_renderers(obj):
@@ -616,7 +617,7 @@ def _fetch_innertube_radio(seed_video_id, limit=20):
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8"
             }
         )
-        with urllib.request.urlopen(req, timeout=3.5) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
         tab_list = (data.get("contents", {})
@@ -847,7 +848,8 @@ def fetch_wave_candidates(
             futures.append(executor.submit(_yandex_chart_candidates, 16))
 
         # ожидание потоков
-        for f in concurrent.futures.as_completed(futures, timeout=5.5):
+        done, _ = concurrent.futures.wait(futures, timeout=3.5)
+        for f in done:
             try:
                 res = f.result()
                 if res:
@@ -1010,6 +1012,115 @@ def _pick_best_audio_entry(entries, expected_dur_sec, artist="", title=""):
     return best
 
 
+
+def _clean_str(s):
+    if not s:
+        return ""
+    s = html.unescape(s)
+    s = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', s)
+    s = re.sub(r'[^a-zA-Zа-яА-Я0-9\s]', ' ', s)
+    return " ".join(s.lower().split())
+
+
+def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
+    """Прямой поиск MP3."""
+    clean_a = _clean_str(artist)
+    clean_t = _clean_str(title)
+    queries = [
+        f"{artist} {title}".strip(),
+        f"{title}".strip()
+    ]
+
+    best_candidate = None
+    best_score = -1.0
+
+    headers = {
+        "User-Agent": USER_AGENT_WEB,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
+    }
+
+    for q in queries:
+        try:
+            url = "https://mp3party.net/search?q=" + urllib.parse.quote(q)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=3.5) as r:
+                body = r.read().decode("utf-8", errors="ignore")
+
+            song_blocks = re.findall(r'<div class="track song-item"[^>]*>(.*?)</div>\s*</div>', body, re.DOTALL)
+            if not song_blocks:
+                song_blocks = re.findall(r'<div class="track__user-panel"([^>]+)>', body)
+
+            for b in song_blocks:
+                m_url = re.search(r'data-js-url="([^"]+)"', b)
+                if not m_url:
+                    continue
+                stream_url = m_url.group(1).strip()
+                if not stream_url.endswith(".mp3"):
+                    continue
+
+                m_art = re.search(r'data-js-artist-name="([^"]+)"', b)
+                m_tit = re.search(r'data-js-song-title="([^"]+)"', b)
+                m_img = re.search(r'data-js-image="([^"]+)"', b)
+
+                raw_art = html.unescape(m_art.group(1)) if m_art else ""
+                raw_tit = html.unescape(m_tit.group(1)) if m_tit else ""
+                raw_img = m_img.group(1) if m_img else ""
+                if raw_img and raw_img.startswith("/"):
+                    raw_img = "https://mp3party.net" + raw_img
+
+                m_dur = re.search(r'<div class="track__info-item">\s*(\d+):(\d+)\s*</div>', b)
+                dur_sec = 0
+                if m_dur:
+                    dur_sec = int(m_dur.group(1)) * 60 + int(m_dur.group(2))
+
+                c_art = _clean_str(raw_art)
+                c_tit = _clean_str(raw_tit)
+
+                score = 50.0
+                if clean_t and clean_t in c_tit:
+                    score += 50.0
+                elif clean_t and any(word in c_tit for word in clean_t.split() if len(word) > 2):
+                    score += 25.0
+
+                if clean_a and clean_a in c_art:
+                    score += 40.0
+                elif clean_a and any(word in c_art for word in clean_a.split() if len(word) > 2):
+                    score += 20.0
+
+                if expected_dur_sec > 0 and dur_sec > 0:
+                    diff = abs(dur_sec - expected_dur_sec)
+                    if diff <= 8:
+                        score += 30.0
+                    elif diff <= 20:
+                        score += 15.0
+                    elif diff > 60:
+                        score -= 25.0
+
+                if dur_sec > 0 and (dur_sec < 45 or dur_sec > 600):
+                    score -= 80.0
+
+                if score > best_score:
+                    best_score = score
+                    best_candidate = {
+                        "stream_url": stream_url,
+                        "artist": raw_art or artist,
+                        "title": raw_tit or title,
+                        "cover_url": raw_img,
+                        "duration_ms": dur_sec * 1000 if dur_sec > 0 else (int(expected_dur_sec * 1000) if expected_dur_sec > 0 else 180000),
+                        "score": score
+                    }
+
+            if best_candidate and best_score >= 70.0:
+                break
+        except Exception as ex:
+            print(f"Direct mp3 note for '{q}': {ex}")
+
+    if best_candidate and best_score >= 60.0:
+        return best_candidate
+    return None
+
+
 def resolve_wave_stream(artist, title, cover_url="", duration_ms=0, video_id=""):
     """Стрим трека."""
     key = _norm_key(artist, title)
@@ -1022,6 +1133,29 @@ def resolve_wave_stream(artist, title, cover_url="", duration_ms=0, video_id="")
             return json.dumps(cached_obj, ensure_ascii=False)
 
     expected_dur_sec = float(duration_ms) / 1000.0 if duration_ms and duration_ms > 0 else 0
+
+    # прямой MP3
+    try:
+        direct = _resolve_direct_mp3(artist, title, expected_dur_sec)
+        if direct and direct.get("stream_url"):
+            final_cover = cover_url or direct.get("cover_url") or ""
+            actual_dur_ms = int(direct.get("duration_ms") or (duration_ms or 180000))
+            res_dict = {
+                "status": "success",
+                "stream_url": direct["stream_url"],
+                "video_id": f"mp3_{abs(hash(direct['stream_url'])) % 100000000}",
+                "source_url": direct["stream_url"],
+                "title": direct.get("title") or title or "Unknown",
+                "artist": direct.get("artist") or artist or "Unknown",
+                "cover_url": final_cover,
+                "duration_ms": actual_dur_ms,
+                "user_agent": USER_AGENT_WEB,
+            }
+            _STREAM_CACHE[key] = (res_dict, now + 14400)
+            return json.dumps(res_dict, ensure_ascii=False)
+    except Exception as d_err:
+        print(f"Direct MP3 note: {d_err}")
+
 
     opts = {
         "quiet": True,
