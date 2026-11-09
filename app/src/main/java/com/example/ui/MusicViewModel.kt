@@ -35,6 +35,9 @@ import androidx.media3.session.SessionToken
 import android.content.ComponentName
 import com.example.data.*
 import com.example.ui.components.TrackEditDraft
+import com.example.util.AppUpdateManager
+import com.example.util.AppUpdateState
+import com.example.util.UpdateInfo
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
@@ -118,7 +121,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val commandHandler = object : PlayerHub.CommandHandler {
         override fun onPlayPause() = togglePlayPause()
-        override fun onNext() { if (_isWaveActive.value) skipNextWaveTrack(getApplication()) else playNextTrack() }
+        override fun onNext() {
+            if (_isWaveActive.value || _currentTrack.value?.id?.startsWith("wave_") == true) {
+                _isWaveActive.value = true
+                skipNextWaveTrack(getApplication())
+            } else {
+                playNextTrack()
+            }
+        }
         override fun onPrevious() = playPreviousTrack()
         override fun onToggleFavorite() {
             _currentTrack.value?.let { toggleFavorite(it.id) }
@@ -164,6 +174,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
+
+    private val _appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val appUpdateState: StateFlow<AppUpdateState> = _appUpdateState.asStateFlow()
 
     // удаление трека
     private val _pendingDeleteIntent = MutableStateFlow<android.app.PendingIntent?>(null)
@@ -729,6 +742,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     init {
         PlayerHub.commandHandler = commandHandler
         connectMediaSession()
+        checkForAppUpdate(silent = true)
 
         // автоплей гарнитуры
         try {
@@ -1584,7 +1598,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playNextTrack() {
-        if (_isWaveActive.value) {
+        if (_isWaveActive.value || _currentTrack.value?.id?.startsWith("wave_") == true) {
+            _isWaveActive.value = true
             skipNextWaveTrack(getApplication())
             return
         }
@@ -2564,10 +2579,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipNextWaveTrack(context: Context) {
-        if (!_isWaveActive.value) {
+        if (!_isWaveActive.value && _currentTrack.value?.id?.startsWith("wave_") != true) {
             playNextTrack()
             return
         }
+        _isWaveActive.value = true
         val cur = _currentTrack.value
         recordWaveTrackFeedback(cur, isNaturalCompletion = false)
         val q = _playbackQueue.value
@@ -3525,6 +3541,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetUpdateState() {
         _updateState.value = UpdateState.Idle
+    }
+
+    // проверка обновлений
+    fun checkForAppUpdate(silent: Boolean = false) {
+        viewModelScope.launch {
+            if (!silent) _appUpdateState.value = AppUpdateState.Checking
+            val info = AppUpdateManager.checkUpdate()
+            if (info != null) {
+                _appUpdateState.value = AppUpdateState.Available(info)
+            } else {
+                if (!silent) _appUpdateState.value = AppUpdateState.UpToDate
+            }
+        }
+    }
+
+    // скачивание и запуск установки
+    fun startAppUpdate(context: Context, info: UpdateInfo) {
+        viewModelScope.launch {
+            _appUpdateState.value = AppUpdateState.Downloading(0f)
+            val file = AppUpdateManager.downloadApk(context, info) { progress ->
+                _appUpdateState.value = AppUpdateState.Downloading(progress)
+            }
+            if (file != null && file.exists()) {
+                _appUpdateState.value = AppUpdateState.ReadyToInstall(file)
+                AppUpdateManager.installApk(context, file)
+            } else {
+                _appUpdateState.value = AppUpdateState.Error("Не удалось скачать файл обновления")
+            }
+        }
+    }
+
+    // закрыть диалог
+    fun dismissAppUpdate() {
+        _appUpdateState.value = AppUpdateState.Idle
     }
 
     fun checkForUpdates() {

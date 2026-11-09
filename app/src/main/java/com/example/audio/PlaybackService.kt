@@ -3,6 +3,7 @@ package com.example.audio
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
@@ -154,6 +155,42 @@ class PlaybackService : MediaSessionService() {
                 ACTION_CLOSE -> PlayerHub.commandHandler?.onStop()
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent
+        ): Boolean {
+            val keyEvent = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                ?: return super.onMediaButtonEvent(session, controllerInfo, intent)
+            if (keyEvent.action != KeyEvent.ACTION_DOWN) return true
+            when (keyEvent.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_NEXT,
+                KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
+                KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> {
+                    PlayerHub.commandHandler?.onNext()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
+                KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> {
+                    PlayerHub.commandHandler?.onPrevious()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_HEADSETHOOK,
+                KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                    PlayerHub.commandHandler?.onPlayPause()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_STOP -> {
+                    PlayerHub.commandHandler?.onPlayPause()
+                    return true
+                }
+            }
+            return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
     }
 

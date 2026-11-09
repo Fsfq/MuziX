@@ -9,6 +9,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.ui.screens.SettingsScreen
+import com.example.util.AppUpdateState
+import com.example.util.UpdateInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,7 +49,10 @@ fun M3SettingsSheet(
     onSelectUiScalePercent: (Float) -> Unit = {},
     dynamicIslandEnabled: Boolean = false,
     onToggleDynamicIsland: (Boolean) -> Unit = {},
-    onOpenEqualizer: (() -> Unit)? = null
+    onOpenEqualizer: (() -> Unit)? = null,
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckUpdate: () -> Unit = {},
+    onStartUpdate: (UpdateInfo) -> Unit = {}
 ) {
     if (!show) return
 
@@ -96,7 +101,10 @@ fun M3SettingsSheet(
                 dynamicIslandEnabled = dynamicIslandEnabled,
                 onToggleDynamicIsland = onToggleDynamicIsland,
                 onOpenEqualizer = onOpenEqualizer,
-                onClose = onDismiss
+                onClose = onDismiss,
+                appUpdateState = appUpdateState,
+                onCheckUpdate = onCheckUpdate,
+                onStartUpdate = onStartUpdate
             )
         }
     }

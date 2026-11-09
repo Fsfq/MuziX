@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.content.Context
+import com.example.util.AppUpdateState
+import com.example.util.UpdateInfo
 import android.graphics.Color as AndroidColor
 import android.os.Build
 import androidx.compose.animation.*
@@ -69,6 +71,9 @@ fun SettingsScreen(
     onToggleDynamicIsland: (Boolean) -> Unit = {},
     onOpenEqualizer: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckUpdate: () -> Unit = {},
+    onStartUpdate: (UpdateInfo) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -704,26 +709,11 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp, horizontal = 20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "MuziX 1.1.0",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    AppVersionCard(
+                        appUpdateState = appUpdateState,
+                        onCheckUpdate = onCheckUpdate,
+                        onStartUpdate = onStartUpdate
+                    )
                 }
             } else {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -1135,26 +1125,11 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp, horizontal = 20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "MuziX 1.1.0",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    AppVersionCard(
+                        appUpdateState = appUpdateState,
+                        onCheckUpdate = onCheckUpdate,
+                        onStartUpdate = onStartUpdate
+                    )
                 }
             }
         }
@@ -1423,6 +1398,129 @@ fun PaletteSelectionDialog(
                     )
                 ) {
                     Text("Применить", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun AppVersionCard(
+    appUpdateState: AppUpdateState,
+    onCheckUpdate: () -> Unit,
+    onStartUpdate: (UpdateInfo) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp, horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "MuziX ${com.example.BuildConfig.VERSION_NAME} (${com.example.BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Open Source • GitHub",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            when (appUpdateState) {
+                is AppUpdateState.Checking -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text(
+                            text = "Проверка...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                is AppUpdateState.UpToDate -> {
+                    Text(
+                        text = "У вас актуальная версия",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                is AppUpdateState.Available -> {
+                    val info = appUpdateState.info
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Доступно: ${info.releaseTag}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FilledTonalButton(
+                            onClick = { onStartUpdate(info) },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Скачать и установить")
+                        }
+                    }
+                }
+                is AppUpdateState.Downloading -> {
+                    val pct = (appUpdateState.progress * 100).toInt()
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Загрузка: $pct%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { appUpdateState.progress },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        )
+                    }
+                }
+                is AppUpdateState.ReadyToInstall -> {
+                    Text(
+                        text = "Файл скачан. Установка...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                is AppUpdateState.Error -> {
+                    Text(
+                        text = appUpdateState.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = onCheckUpdate, shape = RoundedCornerShape(12.dp)) {
+                        Text("Повторить")
+                    }
+                }
+                else -> {
+                    OutlinedButton(
+                        onClick = onCheckUpdate,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Проверить обновления")
+                    }
                 }
             }
         }

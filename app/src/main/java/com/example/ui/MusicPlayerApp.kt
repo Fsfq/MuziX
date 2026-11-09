@@ -38,6 +38,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.Track
 import com.example.ui.components.*
+import com.example.util.AppUpdateState
+import com.example.util.UpdateInfo
 import com.example.ui.screens.*
 import kotlinx.coroutines.launch
 
@@ -50,6 +52,7 @@ fun MusicPlayerApp(
 
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+    val appUpdateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
     val shuffleMode by viewModel.shuffleMode.collectAsStateWithLifecycle()
     val repeatMode by viewModel.repeatMode.collectAsStateWithLifecycle()
@@ -475,7 +478,10 @@ fun MusicPlayerApp(
             onOpenEqualizer = {
                 showSettingsSheet = false
                 showEqualizerSheet = true
-            }
+            },
+            appUpdateState = appUpdateState,
+            onCheckUpdate = { viewModel.checkForAppUpdate() },
+            onStartUpdate = { viewModel.startAppUpdate(context, it) }
         )
 
         CreatePlaylistDialog(
@@ -483,6 +489,41 @@ fun MusicPlayerApp(
             onDismiss = { showCreatePlaylistDialog = false },
             onConfirm = { viewModel.createPlaylist(it) }
         )
+
+        if (appUpdateState is AppUpdateState.Available) {
+            val updateInfo = (appUpdateState as AppUpdateState.Available).info
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissAppUpdate() },
+                title = {
+                    Text(
+                        text = "Доступно обновление ${updateInfo.releaseTag}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = updateInfo.changelog.ifBlank { "Вышла новая версия MuziX на GitHub." },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.startAppUpdate(context, updateInfo) },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Обновить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissAppUpdate() }) {
+                        Text("Позже")
+                    }
+                }
+            )
+        }
 
         AddToPlaylistSheet(
             track = showAddToPlaylistSheet,

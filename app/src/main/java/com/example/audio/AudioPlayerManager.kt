@@ -112,7 +112,7 @@ class AudioPlayerManager(
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (mediaItem == null) return
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
                 val track = knownTracks[mediaItem.mediaId] ?: return
                 currentTrack = track
                 startedNotified = false

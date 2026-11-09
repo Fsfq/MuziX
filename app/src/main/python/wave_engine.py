@@ -781,14 +781,16 @@ def fetch_wave_candidates(
     # запросы поиска
     if is_instrumental_only:
         mood_terms = [
-            "phonk drift instrumental",
+            "phonk drift instrumental no vocal",
             "lofi hip hop beats instrumental",
-            "synthwave instrumental relax",
-            "chill beats no vocal",
+            "chillhop instrumental beats",
+            "synthwave retrowave instrumental",
+            "ambient chill beats no lyrics",
             "guitar instrumental relax",
-            "electronic instrumental music"
+            "electronic instrumental music",
+            "piano relax instrumental"
         ]
-        picked_seeds = ["DVRST", "Shadowraze", "Crystal Castles", "Daft Punk"]
+        picked_seeds = ["DVRST", "Kordhell", "Hensonn", "Interworld", "C418", "HOME", "Ludovico Einaudi", "Hans Zimmer"]
     elif is_english_only:
         en_terms = [t for t in mood_terms if not re.search(r"[\u0400-\u04FF]", t)]
         if en_terms:
@@ -822,9 +824,17 @@ def fetch_wave_candidates(
         for a in picked_seeds[:3]:
             futures.append(executor.submit(_fetch_innertube_search, f"{a} {artist_suffix}", 8, f"YouTube {a}"))
 
-        # артисты Яндекс
-        for a in picked_seeds:
-            futures.append(executor.submit(_yandex_artist_recommendations, a, eff_character, banned_set, known_artist_low))
+        if is_instrumental_only:
+            for a in picked_seeds[:3]:
+                futures.append(executor.submit(_yandex_search_candidates, f"{a} instrumental", 8, "Инструментал"))
+        else:
+            # артисты Яндекс
+            for a in picked_seeds:
+                futures.append(executor.submit(_yandex_artist_recommendations, a, eff_character, banned_set, known_artist_low))
+
+            # каталог Deezer
+            for a in picked_seeds[:2]:
+                futures.append(executor.submit(_deezer_artist_recommendations, a, 8, f"Deezer Radio {a}"))
 
         # поиск настроения
         if mood_terms:
@@ -833,12 +843,8 @@ def fetch_wave_candidates(
             futures.append(executor.submit(_yandex_search_candidates, mterm, 8, effective_mood))
 
         # чарты трендов
-        if eff_character == "Популярное" or len(picked_seeds) < 3:
+        if not is_instrumental_only and (eff_character == "Популярное" or len(picked_seeds) < 3):
             futures.append(executor.submit(_yandex_chart_candidates, 16))
-
-        # каталог Deezer
-        for a in picked_seeds[:2]:
-            futures.append(executor.submit(_deezer_artist_recommendations, a, 8, f"Deezer Radio {a}"))
 
         # ожидание потоков
         for f in concurrent.futures.as_completed(futures, timeout=5.5):
@@ -924,7 +930,12 @@ def fetch_wave_candidates(
         if is_english_only and has_cyrillic:
             continue
         if is_instrumental_only:
-            if re.search(r"\b(?:lyrics|текст\s+песни|вокал|feat\.|ft\.)\b", t_low):
+            vocal_pattern = r"(?i)\b(vocal|vocals|feat|feat\.|ft|ft\.|lyrics|lyric|текст|текст\s+песни|клип|voice|singing|song|remix\s+feat|official\s+video|official\s+music\s+video|acapella|cover|duet)\b"
+            if re.search(vocal_pattern, t_low):
+                continue
+            inst_pattern = r"(?i)(instrumental|inst\b|beat\b|beats\b|phonk|synthwave|ambient|lofi|lo-fi|chillhop|soundtrack|ost\b|score\b|piano\b|orchestral|guitar\b|no\s+vocal|no\s+lyrics|без\s+слов|инструментал|минус\b|караоке|bgm\b|theme\b|slowed|acoustic)"
+            full_meta = f"{t_low} {a_low} {reason_low}"
+            if not re.search(inst_pattern, full_meta):
                 continue
 
         if eff_character == "Незнакомое" and a_low in known_artist_low and len(raw_candidates) > limit:
