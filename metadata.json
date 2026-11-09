@@ -1,0 +1,6 @@
+{
+  "name": "Music Player",
+  "description": "A beautiful Material 3 You music player with a sliding player overlay, compact synchronized lyrics, an equalizer, and a localized YouTube music downloader utility.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

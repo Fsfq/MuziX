@@ -1,0 +1,41 @@
+# Android & Gradle
+*.iml
+.gradle
+.kotlin
+build/
+app/release/
+captures/
+.externalNativeBuild
+.cxx
+
+# Local configurations & secrets
+local.properties
+.env
+*.keystore
+*.jks
+release.keystore
+debug.keystore
+
+# IDE & Editor
+.idea/
+.codegraph/
+.DS_Store
+
+# Built binaries & APKs
+*.apk
+*.aab
+Muzix_*.apk
+
+# Temporary debug dumps & test outputs
+*.log
+server.log
+test_yt*.json
+yt_search_resp.json
+ui_*.xml
+screen_*.png
+screen_*.jpg
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

@@ -1,0 +1,23 @@
+# Baseline Profile for Muzix - AOT Compilation Hints
+Lcom/example/MainActivity;
+HSPLcom/example/MainActivity;->onCreate(Landroid/os/Bundle;)V
+Lcom/example/MusicApplication;
+HSPLcom/example/MusicApplication;->onCreate()V
+Lcom/example/ui/MusicViewModel;
+HSPLcom/example/ui/MusicViewModel;-><init>(Landroid/app/Application;)V
+Lcom/example/audio/AudioPlayerManager;
+Lcom/example/audio/MusicPlaybackService;
+Lcom/example/ui/MusicPlayerAppKt;
+HSPLcom/example/ui/MusicPlayerAppKt;->MusicPlayerApp(Lcom/example/ui/MusicViewModel;Landroidx/compose/runtime/Composer;II)V
+Lcom/example/ui/components/M3PlayerSheetKt;
+Lcom/example/ui/components/M3VisualizerKt;
+Lcom/example/ui/components/M3TrackItemKt;
+Lcom/example/ui/components/M3MiniPlayerKt;
+Lcom/example/ui/screens/TracksScreenKt;
+Lcom/example/ui/screens/PlaylistsScreenKt;
+Lcom/example/ui/screens/DownloaderScreenKt;
+Landroidx/compose/runtime/ComposerImpl;
+HSPLandroidx/compose/runtime/ComposerImpl;->startRestartGroup(I)Landroidx/compose/runtime/Composer;
+HSPLandroidx/compose/runtime/ComposerImpl;->endRestartGroup()Landroidx/compose/runtime/ScopeUpdateScope;
+Landroidx/compose/foundation/lazy/LazyColumnKt;
+Landroidx/compose/material3/MaterialThemeKt;
