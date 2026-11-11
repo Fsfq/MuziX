@@ -30,6 +30,7 @@ import com.example.audio.AudioPlayerManager
 import com.example.audio.ViperAudioDsp
 import com.example.audio.PlayerHub
 import com.example.audio.PlaybackService
+import com.example.audio.NativeTrackMatcher
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import android.content.ComponentName
@@ -1090,8 +1091,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         _allTracks.value = filtered
 
-        val seedable = filtered.filter { it.duration in 60_000L..600_000L && it.artist.isNotBlank() }
-            .map { it.artist }.distinct().take(30).toSet()
+        val seedable = filtered.filter { 
+            it.duration in 60_000L..600_000L && 
+            it.artist.isNotBlank() &&
+            !NativeTrackMatcher.isJunk(it.artist, it.title, it.path)
+        }.map { 
+            NativeTrackMatcher.cleanTrack(it.artist, it.title).first 
+        }.filter { it.isNotBlank() && it.length >= 2 }.distinct().take(30).toSet()
+
         if (seedable.isNotEmpty()) {
             prefs.edit().putStringSet("cached_seed_artists", seedable).apply()
         }
@@ -2434,31 +2441,39 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (waveCandidatePool.size >= 14) return
         val all = _allTracks.value
         val favIds = _favoriteTrackIds.value
-        // фильтр треков
-        val bannedMarkers = setOf(
-            "<unknown>", "unknown", "unknown artist", "неизвестный", "неизвестный исполнитель",
-            "audio", "sound", "track", "voice", "ost", "soundtrack", "recording", "запись"
-        )
+        
+        // Жесткая фильтрация нативным парсером звонков, диктофона, нейрослопа и шума
         val validLocal = all.filter {
             it.duration in 60_000L..600_000L &&
             it.artist.isNotBlank() &&
-            it.artist.trim().lowercase() !in bannedMarkers &&
-            !it.artist.contains("call of duty", ignoreCase = true) &&
-            !it.artist.contains("soundtrack", ignoreCase = true)
+            !NativeTrackMatcher.isJunk(it.artist, it.title, it.path)
         }
 
-        val moodSeeds = when (_waveMood.value) {
-            "Бодрое" -> listOf("DVRST", "Big Baby Tape", "Kizaru", "Miyagi & Эндшпиль", "FRIENDLY THUG 52 NGG", "Skrillex", "The Prodigy", "PHARAOH")
-            "Спокойное" -> listOf("Miyagi & Andy Panda", "Скриптонит", "Сироткин", "Zoloto", "три дня дождя", "Дайте танк (!)", "Saluki")
-            "Мрачное" -> listOf("Crystal Castles", "Молчат Дома", "Ploho", "IC3PEAK", "Mareux", "Буерак", "GSPD")
-            "Весёлое" -> listOf("Daft Punk", "The Weeknd", "Dua Lipa", "DEAD BLONDE", "Cream Soda", "Lida", "GONE.Fludd", "The Hatters")
-            else -> listOf("Miyagi & Эндшпиль", "Big Baby Tape", "Kizaru", "DVRST", "The Weeknd", "Скриптонит", "Daft Punk")
+        // Извлечение и очистка артистов через Native C++ движок
+        val cleanLocalPairs = validLocal.map { 
+            val clean = NativeTrackMatcher.cleanTrack(it.artist, it.title)
+            it to clean.first
+        }.filter { it.second.isNotBlank() && it.second.length >= 2 }
+
+        val favArtists = cleanLocalPairs.filter { it.first.id in favIds }
+            .map { it.second }.distinct().shuffled().take(12)
+        val localArtists = cleanLocalPairs.map { it.second }.distinct().shuffled().take(12)
+
+        // Чистые пресеты без шаблонного трэпа и гитарного релакса (только если нет локальных треков)
+        val fallbackMoodSeeds = when (_waveMood.value) {
+            "Бодрое" -> listOf("DVRST", "T3NZU", "Sayfalse", "Kordhell", "Skrillex", "The Prodigy", "Виктор Цой", "Кино", "Апология")
+            "Спокойное" -> listOf("Молчат Дома", "Сироткин", "Дайте танк (!)", "Буерак", "C418", "HOME", "Saypink!")
+            "Мрачное" -> listOf("Crystal Castles", "Молчат Дома", "Ploho", "IC3PEAK", "Mareux", "Буерак", "Cupastate", "SKWLKR")
+            "Весёлое" -> listOf("Daft Punk", "Gorillaz", "The Weeknd", "DEAD BLONDE", "GONE.Fludd", "The Hatters")
+            else -> listOf("Виктор Цой", "DVRST", "Молчат Дома", "Daft Punk", "The Weeknd", "T3NZU")
         }
 
-        val favArtists = validLocal.filter { it.id in favIds }.map { it.artist }.distinct().shuffled().take(10)
-        val localArtists = validLocal.map { it.artist }.distinct().shuffled().take(8)
-
-        val seedArtists = (favArtists + localArtists + moodSeeds).distinct().take(15)
+        // Если есть локальные треки или избранное — строим волну СТРОГО по вкусу пользователя
+        val seedArtists = if (favArtists.isNotEmpty() || localArtists.isNotEmpty()) {
+            (favArtists + localArtists).distinct().take(15)
+        } else {
+            fallbackMoodSeeds.take(10)
+        }
         val banned = getBannedWaveSet().toList()
         val seen = synchronized(waveSeenKeys) { waveSeenKeys.toList() }
 
@@ -2541,10 +2556,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             // фильтр длительности
                             continue
                         }
+                        val resTitle = obj.optString("title", title).ifBlank { title }
+                        val resArtist = obj.optString("artist", artist).ifBlank { artist }
+                        if (NativeTrackMatcher.isJunk(resArtist, resTitle)) {
+                            Log.d("MusicViewModel", "Filtered junk stream track: $resArtist - $resTitle")
+                            continue
+                        }
                         return Track(
                             id = "wave_${vid}_${System.nanoTime() and 0xFFFF}",
-                            title = obj.optString("title", title).ifBlank { title },
-                            artist = obj.optString("artist", artist).ifBlank { artist },
+                            title = resTitle,
+                            artist = resArtist,
                             duration = finalDur.coerceAtLeast(30_000L),
                             path = streamUrl,
                             isLocal = false,

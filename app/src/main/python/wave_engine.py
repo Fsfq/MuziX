@@ -1,14 +1,132 @@
 # -*- coding: utf-8 -*-
 import concurrent.futures
+import ctypes
 import html
 import json
 import os
 import random
 import re
+import sys
 import time
 import urllib.parse
 import urllib.request
 import yt_dlp
+
+# Загрузка C++ нативного парсера и матчера треков (PC Windows DLL / Android NDK SO)
+_TM_LIB = None
+try:
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "track_matcher.dll"),
+        os.path.join(os.path.dirname(__file__), "..", "cpp", "track_matcher.dll"),
+        os.path.abspath("track_matcher.dll"),
+        "track_matcher.dll",
+        "libtrack_matcher.so",
+        "/data/data/ru.FsFqX.Muzix/lib/libtrack_matcher.so",
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                _TM_LIB = ctypes.CDLL(os.path.abspath(p))
+                print(f"[wave_engine] Loaded native track_matcher from: {p}")
+                break
+            except Exception as e:
+                print(f"[wave_engine] Error loading {p}: {e}")
+    if not _TM_LIB:
+        try:
+            _TM_LIB = ctypes.CDLL("libtrack_matcher.so")
+            print("[wave_engine] Loaded system libtrack_matcher.so")
+        except Exception:
+            _TM_LIB = None
+except Exception as ex:
+    _TM_LIB = None
+    print(f"[wave_engine] Native loader exception: {ex}")
+
+if _TM_LIB:
+    try:
+        _TM_LIB.tm_match_tracks.argtypes = [
+            ctypes.c_char_p, ctypes.c_char_p,
+            ctypes.c_char_p, ctypes.c_char_p,
+            ctypes.c_int64, ctypes.c_int64
+        ]
+        _TM_LIB.tm_match_tracks.restype = ctypes.c_float
+
+        _TM_LIB.tm_is_junk.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+        _TM_LIB.tm_is_junk.restype = ctypes.c_int
+
+        _TM_LIB.tm_clean_track.argtypes = [
+            ctypes.c_char_p, ctypes.c_char_p,
+            ctypes.c_char_p, ctypes.c_int,
+            ctypes.c_char_p, ctypes.c_int
+        ]
+        _TM_LIB.tm_clean_track.restype = None
+    except Exception as e:
+        print(f"[wave_engine] Failed to bind C functions: {e}")
+        _TM_LIB = None
+
+
+def tm_is_junk(artist, title, path=""):
+    if _TM_LIB:
+        try:
+            return bool(_TM_LIB.tm_is_junk(
+                (artist or "").encode("utf-8"),
+                (title or "").encode("utf-8"),
+                (path or "").encode("utf-8")
+            ))
+        except Exception:
+            pass
+    low = f"{artist} {title} {path}".lower()
+    junk_markers = (
+        "recordings", "callrecordings", "/calls/", "диктофон", "запись звонка",
+        "sunofix", "suno.ai", "suno", "udio", "нейросеть", "ai cover", "ai song",
+        "шум дождя", "для сна", "белый шум", "sleep sound", "relaxing guitar",
+        "гитар релакс", "гитара релакс", "acoustic guitar chill", "trap beat",
+        "type beat", "call of duty", "jack wall", "game ost"
+    )
+    if any(m in low for m in junk_markers):
+        return True
+    a_low = (artist or "").strip().lower()
+    return a_low in ("<unknown>", "unknown", "неизвестный исполнитель")
+
+
+def tm_match_tracks(a1, t1, a2, t2, dur1=0, dur2=0):
+    if _TM_LIB:
+        try:
+            return float(_TM_LIB.tm_match_tracks(
+                (a1 or "").encode("utf-8"),
+                (t1 or "").encode("utf-8"),
+                (a2 or "").encode("utf-8"),
+                (t2 or "").encode("utf-8"),
+                int(dur1),
+                int(dur2)
+            ))
+        except Exception:
+            pass
+    c_t1 = re.sub(r"[^a-zа-яё0-9]+", "", (t1 or "").lower())
+    c_t2 = re.sub(r"[^a-zа-яё0-9]+", "", (t2 or "").lower())
+    if not c_t1 or not c_t2:
+        return 0.0
+    if c_t1 == c_t2 or c_t1 in c_t2 or c_t2 in c_t1:
+        return 0.85
+    return 0.0
+
+
+def tm_clean_track(raw_artist, raw_title):
+    if _TM_LIB:
+        try:
+            buf_art = ctypes.create_string_buffer(512)
+            buf_tit = ctypes.create_string_buffer(512)
+            _TM_LIB.tm_clean_track(
+                (raw_artist or "").encode("utf-8"),
+                (raw_title or "").encode("utf-8"),
+                buf_art, 512,
+                buf_tit, 512
+            )
+            return buf_art.value.decode("utf-8", errors="ignore"), buf_tit.value.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+    c_art = re.sub(r"\[.*?\]|\(.*?\)", "", raw_artist or "").strip()
+    c_tit = re.sub(r"\[.*?\]|\(.*?\)", "", raw_title or "").strip()
+    return c_art, c_tit
 
 USER_AGENT_WEB = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -22,30 +140,30 @@ YANDEX_HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
-# пресеты настроений
+# пресеты настроений (очищены от шаблонного трэпа и гитарного релакса)
 MOOD_QUERIES_YANDEX = {
     "Бодрое": [
         "phonk drift",
-        "workout hits",
+        "workout phonk",
         "drum and bass neurofunk",
-        "бодрый русский рэп",
         "хиты фонка",
-        "energetic trap",
-        "gym workout phonk",
-        "club bass electronic",
-        "russian trap hits",
-        "русский трэп",
+        "brazilian phonk",
+        "russian rock hits",
+        "виктор цой рок",
+        "кино песни",
+        "dark phonk bass",
+        "electronic club bass",
     ],
     "Спокойное": [
+        "русский пост панк",
         "lofi hip hop beats",
-        "acoustic guitar chill",
-        "indie chill vibes",
+        "молчат дома пост панк",
         "русский инди",
-        "спокойный чилл",
-        "вечерняя музыка для души",
-        "ambient relax calm",
-        "атмосферный поп",
-        "neo soul chill",
+        "спокойный инди рок",
+        "synthwave retrowave chill",
+        "дайте танк рок",
+        "буерак пост панк",
+        "сироткин инди",
     ],
     "Мрачное": [
         "dark phonk",
@@ -55,17 +173,18 @@ MOOD_QUERIES_YANDEX = {
         "витчхаус",
         "мрачный рок",
         "cold wave russian",
-        "депрессивный хип хоп",
         "gothic dark synth",
+        "cupastate phonk",
+        "skwlkr phonk",
     ],
     "Весёлое": [
         "party dance hits",
         "disco funk dance",
         "summer party hits",
         "танцевальные хиты русские",
-        "веселая вечеринка",
+        "dead blonde танцы",
         "club dance electro",
-        "зажигательный поп",
+        "daft punk dance",
         "house dance party",
         "электро свинг",
     ],
@@ -73,20 +192,20 @@ MOOD_QUERIES_YANDEX = {
 
 DEFAULT_SEEDS = {
     "Бодрое": [
-        "DVRST", "Shadowraze", "Skrillex", "The Prodigy", "Big Baby Tape",
-        "Miyagi & Эндшпиль", "PHARAOH", "Travis Scott", "Fred again..", "Kizaru", "Markul"
+        "Виктор Цой", "Кино", "Апология", "DVRST", "T3NZU",
+        "Sayfalse", "Scythermane", "Kordhell", "Skrillex", "The Prodigy"
     ],
     "Спокойное": [
-        "Mac DeMarco", "Cigarettes After Sex", "Joji", "Скриптонит", "Сироткин",
-        "Beach House", "Zoloto", "три дня дождя", "Дайте танк (!)", "Saypink!"
+        "Молчат Дома", "Сироткин", "Дайте танк (!)", "Буерак", "C418",
+        "HOME", "Saypink!", "Ploho", "Черниковская Хата"
     ],
     "Мрачное": [
-        "Crystal Castles", "Lebanon Hanover", "Молчат Дома", "Ploho", "IC3PEAK",
-        "Mareux", "Буерак", "Boy Harsher", "Черниковская Хата", "GSPD"
+        "Crystal Castles", "Молчат Дома", "Ploho", "IC3PEAK", "Mareux",
+        "Буерак", "Cupastate", "SKWLKR", "Lebanon Hanover"
     ],
     "Весёлое": [
-        "Daft Punk", "Gorillaz", "The Weeknd", "Dua Lipa", "DEAD BLONDE",
-        "Cream Soda", "Lida", "Calvin Harris", "GONE.Fludd", "The Hatters"
+        "Daft Punk", "Gorillaz", "The Weeknd", "DEAD BLONDE",
+        "Cream Soda", "GONE.Fludd", "The Hatters"
     ],
 }
 
@@ -188,14 +307,24 @@ BANNED_TITLE_REGEXES = [
     re.compile(r"\b(?:soundtrack\s+full|ost\s+full|compilation)\b", re.I),
     re.compile(r"\b(?:звуки|шум|для сна|медитаци|атмосфер|желобок|каникулы|шум дождя|релакс для|фоновый шум|sleep sound|white noise|relaxing sound|nature sounds)\b", re.I),
     re.compile(r"\b(?:минусовка|минус|караоке|рингтон|ringtone|sound effects|sfx|game ost|soundtrack)\b", re.I),
+    re.compile(r"\b(?:трэп|trap\s+beat|type\s+beat|free\s+beat)\b", re.I),
+    re.compile(r"\b(?:guitar\s+relax|relaxing\s+guitar|гитар\s+релакс|гитара\s+релакс|акустическая\s+гитара\s+релакс|acoustic\s+guitar\s+chill)\b", re.I),
+    re.compile(r"\b(?:suno|udio|sunofix|ai\s+generated|нейросеть|ai\s+song|ai\s+cover)\b", re.I),
+    re.compile(r"\b(?:call\s+of\s+duty|jack\s+wall)\b", re.I),
 ]
 
 
-def _is_title_banned(title):
+def _is_title_banned(title, artist=""):
     if not title:
         return False
     t = title.strip()
-    return any(rx.search(t) for rx in BANNED_TITLE_REGEXES)
+    if any(rx.search(t) for rx in BANNED_TITLE_REGEXES):
+        return True
+    if artist and any(rx.search(artist.strip()) for rx in BANNED_TITLE_REGEXES):
+        return True
+    if tm_is_junk(artist, title):
+        return True
+    return False
 
 
 def _parse_time_str_to_sec(text):
@@ -276,7 +405,7 @@ def _yandex_track_to_candidate(item, reason=""):
     # фильтр длительности
     if duration_ms < 60000 or duration_ms > 600000:
         return None
-    if _is_title_banned(title):
+    if _is_title_banned(title, artist):
         return None
 
     yandex_id = str(item.get("id") or "")
@@ -432,7 +561,7 @@ def _deezer_track_to_candidate(item, reason=""):
     # фильтр длительности
     if duration_sec and (duration_sec < 60 or duration_sec > 600):
         return None
-    if _is_title_banned(title):
+    if _is_title_banned(title, artist):
         return None
     return {
         "title": title,
@@ -492,7 +621,7 @@ def _itunes_search_candidates(query, limit=12, reason=""):
             album = (item.get("collectionName") or "").strip()
             art = (item.get("artworkUrl100") or "").replace("100x100bb", "1000x1000bb")
             dur_ms = int(item.get("trackTimeMillis") or 180000)
-            if title and artist and 60000 <= dur_ms <= 600000 and not _is_title_banned(title):
+            if title and artist and 60000 <= dur_ms <= 600000 and not _is_title_banned(title, artist):
                 out.append({
                     "title": title,
                     "artist": artist,
@@ -571,7 +700,7 @@ def _fetch_innertube_search(query, limit=15, reason=""):
             # фильтр длительности
             if dur_sec > 600 or (dur_sec > 0 and dur_sec < 55):
                 continue
-            if _is_title_banned(title):
+            if _is_title_banned(title, artist):
                 continue
 
             thumbs = r.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
@@ -663,7 +792,7 @@ def _fetch_innertube_radio(seed_video_id, limit=20):
             # фильтр подкастов
             if dur_sec > 600 or (dur_sec > 0 and dur_sec < 60):
                 continue
-            if _is_title_banned(t_title):
+            if _is_title_banned(t_title, t_artist):
                 continue
 
             dur_ms = dur_sec * 1000 if dur_sec > 0 else 180000
@@ -793,12 +922,12 @@ def fetch_wave_candidates(
             "lofi hip hop beats instrumental",
             "chillhop instrumental beats",
             "synthwave retrowave instrumental",
-            "ambient chill beats no lyrics",
-            "guitar instrumental relax",
-            "electronic instrumental music",
-            "piano relax instrumental"
+            "electronic synth instrumental",
+            "phonk instrumental no vocal",
+            "retrowave instrumental beats",
+            "ambient chill beats no lyrics"
         ]
-        picked_seeds = ["DVRST", "Kordhell", "Hensonn", "Interworld", "C418", "HOME", "Ludovico Einaudi", "Hans Zimmer"]
+        picked_seeds = ["DVRST", "Lind Erebros", "Kordhell", "T3NZU", "Hensonn", "Interworld", "C418", "HOME"]
     elif is_english_only:
         en_terms = [t for t in mood_terms if not re.search(r"[\u0400-\u04FF]", t)]
         if en_terms:
@@ -850,8 +979,8 @@ def fetch_wave_candidates(
         for mterm in mood_terms[:2]:
             futures.append(executor.submit(_yandex_search_candidates, mterm, 8, effective_mood))
 
-        # чарты трендов (проверенные топ-хиты iTunes и Deezer)
-        if not is_instrumental_only:
+        # чарты трендов только если пользователь явно выбрал режим "Популярное"
+        if not is_instrumental_only and eff_character == "Популярное":
             futures.append(executor.submit(_itunes_chart_candidates, 25))
             futures.append(executor.submit(_deezer_chart_candidates, 25))
 
@@ -979,33 +1108,42 @@ def _pick_best_audio_entry(entries, expected_dur_sec, artist="", title=""):
         if e_dur > 600 or (e_dur > 0 and e_dur < 50):
             continue
 
-        # стоп-слова
-        if _is_title_banned(e_title):
+        # проверка мусора нативным детектором
+        if _is_title_banned(e_title, e_uploader):
             continue
 
         score = 0.0
+
+        # C++ нечеткий матчер треков
+        if artist or title:
+            fuzzy = tm_match_tracks(
+                artist, title, e_uploader, e_title,
+                int(expected_dur_sec * 1000) if expected_dur_sec > 0 else 0,
+                int(e_dur * 1000) if e_dur > 0 else 0
+            )
+            score += fuzzy * 100.0
 
         # сверка длительности
         if expected_dur_sec > 0 and e_dur > 0:
             diff = abs(e_dur - expected_dur_sec)
             if diff <= 6:
-                score += 80.0
+                score += 40.0
             elif diff <= 15:
-                score += 50.0
-            elif diff <= 30:
                 score += 25.0
+            elif diff <= 30:
+                score += 10.0
             elif diff > 90:
                 score -= 60.0
 
         # официальный канал
         if e_uploader.endswith("- Topic"):
-            score += 45.0
-        elif "official audio" in e_title.lower():
             score += 35.0
+        elif "official audio" in e_title.lower():
+            score += 25.0
         elif "audio" in e_title.lower():
-            score += 20.0
-        elif "official music video" in e_title.lower() or "official video" in e_title.lower():
             score += 15.0
+        elif "official music video" in e_title.lower() or "official video" in e_title.lower():
+            score += 10.0
 
         # штраф лайвов
         if "live" in e_title.lower():
@@ -1031,11 +1169,11 @@ def _clean_str(s):
 
 
 def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
-    """Прямой поиск MP3."""
-    clean_a = _clean_str(artist)
-    clean_t = _clean_str(title)
+    """Прямой поиск MP3 с C++ нечетким сопоставлением."""
+    clean_req_a, clean_req_t = tm_clean_track(artist, title)
     queries = [
         f"{artist} {title}".strip(),
+        f"{clean_req_a} {clean_req_t}".strip(),
         f"{title}".strip()
     ]
 
@@ -1048,6 +1186,7 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
     }
 
+    seen_urls = set()
     for q in queries:
         try:
             url = "https://mp3party.net/search?q=" + urllib.parse.quote(q)
@@ -1064,8 +1203,9 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
                 if not m_url:
                     continue
                 stream_url = m_url.group(1).strip()
-                if not stream_url.endswith(".mp3"):
+                if not stream_url.endswith(".mp3") or stream_url in seen_urls:
                     continue
+                seen_urls.add(stream_url)
 
                 m_art = re.search(r'data-js-artist-name="([^"]+)"', b)
                 m_tit = re.search(r'data-js-song-title="([^"]+)"', b)
@@ -1082,39 +1222,21 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
                 if m_dur:
                     dur_sec = int(m_dur.group(1)) * 60 + int(m_dur.group(2))
 
-                c_art = _clean_str(raw_art)
-                c_tit = _clean_str(raw_tit)
-
-                score = 0.0
-
-                # совпадение названия обязательно
-                if clean_t and clean_t in c_tit:
-                    score += 50.0
-                elif clean_t and all(word in c_tit for word in clean_t.split() if len(word) > 2):
-                    score += 45.0
-                elif clean_t and any(word in c_tit for word in clean_t.split() if len(word) > 2):
-                    score += 25.0
-                else:
+                clean_cand_a, clean_cand_t = tm_clean_track(raw_art, raw_tit)
+                if _is_title_banned(clean_cand_t, clean_cand_a):
                     continue
 
-                # артист
-                if clean_a and (clean_a in c_art or c_art in clean_a):
-                    score += 40.0
-                elif clean_a and any(word in c_art for word in clean_a.split() if len(word) > 2):
-                    score += 20.0
-                elif not clean_a:
-                    score += 10.0
+                # C++ Fuzzy Match
+                fuzzy = tm_match_tracks(
+                    clean_req_a, clean_req_t,
+                    clean_cand_a, clean_cand_t,
+                    int(expected_dur_sec * 1000) if expected_dur_sec > 0 else 0,
+                    int(dur_sec * 1000) if dur_sec > 0 else 0
+                )
+                if fuzzy < 0.65:
+                    continue
 
-                # длительность
-                if expected_dur_sec > 0 and dur_sec > 0:
-                    diff = abs(dur_sec - expected_dur_sec)
-                    if diff <= 8:
-                        score += 25.0
-                    elif diff <= 20:
-                        score += 15.0
-                    elif diff > 60:
-                        score -= 30.0
-
+                score = fuzzy * 100.0
                 if dur_sec > 0 and (dur_sec < 45 or dur_sec > 600):
                     score -= 80.0
 
@@ -1122,8 +1244,8 @@ def _resolve_direct_mp3(artist, title, expected_dur_sec=0):
                     best_score = score
                     best_candidate = {
                         "stream_url": stream_url,
-                        "artist": raw_art or artist,
-                        "title": raw_tit or title,
+                        "artist": clean_cand_a or raw_art or artist,
+                        "title": clean_cand_t or raw_tit or title,
                         "cover_url": raw_img,
                         "duration_ms": dur_sec * 1000 if dur_sec > 0 else (int(expected_dur_sec * 1000) if expected_dur_sec > 0 else 180000),
                         "score": score

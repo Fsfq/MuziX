@@ -39,3 +39,12 @@ screen_*.jpg
 __pycache__/
 *.pyc
 *.pyo
+
+# PC build & test scratch
+build_pc/
+scratch/
+*.dll
+*.so
+*.dylib
+*.obj
+*.o
