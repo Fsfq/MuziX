@@ -43,6 +43,8 @@ __pycache__/
 # PC build & test scratch
 build_pc/
 scratch/
+desktop/
+*.exe
 *.dll
 *.so
 *.dylib
